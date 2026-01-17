@@ -122,13 +122,50 @@ export const Home: React.FC = () => {
                                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                                     <tbody className="bg-white divide-y divide-gray-200">
                                         {Object.entries(result).map(([key, value]) => {
-                                            // Skip showing the Hash and maybe some internal IDs
-                                            if (key === 'tcHash') return null;
+                                            // 1. FILTERING: Hide specialized or empty-header columns
+                                            if (
+                                                key === 'tcHash' ||
+                                                key === 'Sıra No' ||
+                                                key.startsWith('Sütun') || // Auto-generated for empty headers
+                                                key.trim() === ''
+                                            ) return null;
+
+                                            // 2. FORMATTING: Detect Currency
+                                            let displayValue = String(value);
+                                            const lowerKey = key.toLowerCase();
+
+                                            // Keywords that suggest money
+                                            const isCurrency = ['tutar', 'destek', 'miktar', 'ödeme', 'net', 'kesinti', 'hakediş'].some(k => lowerKey.includes(k));
+
+                                            // Additional check: value must look like a number
+                                            // Remove spaces to check
+                                            const cleanVal = displayValue.toString().trim();
+
+                                            if (isCurrency && cleanVal && !isNaN(Number(cleanVal.replace(',', '.')))) {
+                                                try {
+                                                    // Try to parse number. Handle Turkish decimal comma if present as string, or standard dot
+                                                    // Usually XLSX reads numbers as numbers (1234.56), but sometimes strings ("1.234,56")
+                                                    let numVal = typeof value === 'number' ? value : parseFloat(cleanVal.replace(/\./g, '').replace(',', '.'));
+
+                                                    // If standard parse failed (e.g. 1234.56 came as string "1234.56"), try just parseFloat
+                                                    if (isNaN(numVal)) numVal = parseFloat(cleanVal);
+
+                                                    if (!isNaN(numVal)) {
+                                                        displayValue = new Intl.NumberFormat('tr-TR', {
+                                                            style: 'currency',
+                                                            currency: 'TRY',
+                                                            minimumFractionDigits: 2
+                                                        }).format(numVal);
+                                                    }
+                                                } catch (e) {
+                                                    // checking failed, keep original
+                                                }
+                                            }
 
                                             return (
                                                 <tr key={key}>
                                                     <td className="px-4 py-2 font-medium text-gray-900 bg-gray-50 capitalize w-1/3 border-r">{key}</td>
-                                                    <td className="px-4 py-2 text-gray-700">{String(value)}</td>
+                                                    <td className="px-4 py-2 text-gray-700">{displayValue}</td>
                                                 </tr>
                                             )
                                         })}
