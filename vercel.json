@@ -1,0 +1,11 @@
+{
+  "rewrites": [
+    { "source": "/.netlify/functions/search", "destination": "/api/search" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/search.ts": {
+      "includeFiles": "api/data/*.json"
+    }
+  }
+}
