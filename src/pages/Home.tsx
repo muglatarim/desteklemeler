@@ -74,18 +74,32 @@ export const Home: React.FC = () => {
     return (
         <div className="min-h-screen bg-gray-100 flex flex-col items-center py-10 px-4">
             <div className="max-w-3xl w-full bg-white rounded-lg shadow-xl overflow-hidden">
-                <header className="bg-red-700 text-white p-6 flex flex-col md:flex-row items-center justify-center gap-6 text-center">
-                    <img
-                        src="https://www.tarimorman.gov.tr/IcerikResimleri/BakanlikLogolariPng/LogoKirmizi_Tarim.png"
-                        alt="T.C. Tarım ve Orman Bakanlığı Logo"
-                        className="h-24 w-auto bg-white rounded-full p-2 shadow-lg"
-                    />
-                    <div className="flex flex-col items-center md:items-start">
+                <header className="bg-red-700 text-white p-4 relative flex items-center justify-center min-h-[120px]">
+                    {/* Logo: Absolute Left on Desktop, Hidden/Stacked on Mobile if needed but user wants it Left. 
+                        Let's use absolute positioning for desktop to ensure text is purely centered relative to container. */}
+                    <div className="absolute left-6 hidden md:block">
+                        <img
+                            src="https://upload.wikimedia.org/wikipedia/commons/6/6d/Tar%C4%B1m_ve_Orman_Bakanl%C4%B1%C4%9F%C4%B1_logo.svg"
+                            alt="Logo"
+                            className="h-24 w-auto brightness-0 invert"
+                        />
+                    </div>
+
+                    {/* Mobile Logo (visible only on small screens, stacked) */}
+                    <div className="md:hidden mb-4">
+                        <img
+                            src="https://upload.wikimedia.org/wikipedia/commons/6/6d/Tar%C4%B1m_ve_Orman_Bakanl%C4%B1%C4%9F%C4%B1_logo.svg"
+                            alt="Logo"
+                            className="h-20 w-auto brightness-0 invert mx-auto"
+                        />
+                    </div>
+
+                    <div className="text-center z-10 px-4 md:px-0">
                         <h1 className="text-xl md:text-2xl font-bold uppercase leading-tight tracking-wide">
                             T.C. MUĞLA VALİLİĞİ<br />
                             İL TARIM VE ORMAN MÜDÜRLÜĞÜ
                         </h1>
-                        <h2 className="text-lg mt-2 font-medium text-red-100">Çiftçi Destekleme Sorgulama Sistemi</h2>
+                        <h2 className="text-sm md:text-lg mt-2 font-medium text-red-100">Çiftçi Destekleme Sorgulama Sistemi</h2>
                     </div>
                 </header>
 
