@@ -125,7 +125,7 @@ export const Home: React.FC = () => {
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">T.C. Kimlik / Vergi Numarası</label>
                             <input
-                                type="text"
+                                type="password"
                                 className="w-full border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 p-2 border"
                                 placeholder="T.C. (11) veya Vergi No (10)"
                                 maxLength={11}
