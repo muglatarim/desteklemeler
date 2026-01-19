@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { hashTC, encryptData } from '../utils/crypto';
+import { hashTC } from '../utils/crypto';
 
 interface DataRow {
     [key: string]: any;
@@ -11,7 +11,9 @@ interface EncryptedOutput {
     [key: string]: string;
 }
 
+// ... imports
 export const AdminConverter: React.FC = () => {
+    // ... basic file state
     const [file, setFile] = useState<File | null>(null);
     const [jsonOutput, setJsonOutput] = useState<EncryptedOutput | null>(null);
     const [processing, setProcessing] = useState(false);
@@ -23,8 +25,10 @@ export const AdminConverter: React.FC = () => {
     const [tcColLetter, setTcColLetter] = useState<string>('');
     const [useDoubleHeader, setUseDoubleHeader] = useState<boolean>(false);
 
-    // Inspection State
+    // Filter / Format / Mapping State
     const [inspectionData, setInspectionData] = useState<{ col: string; val: string; index: number }[] | null>(null);
+    const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
+    const [currencyCols, setCurrencyCols] = useState<Set<number>>(new Set()); // Indexes of columns to format as Currency
     const [statusMsg, setStatusMsg] = useState('');
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,15 +44,19 @@ export const AdminConverter: React.FC = () => {
             setJsonOutput(null);
             setStatusMsg('');
             setInspectionData(null);
+            setDetectedHeaders([]);
+            setCurrencyCols(new Set());
+            setTcColLetter('');
         }
     };
 
+    // ... helpers (getColIndex) same
     const getColIndex = (letter: string): number => {
         const decoded = XLSX.utils.decode_col(letter.toUpperCase());
         return decoded;
     };
 
-    // Helper to merge parent row (with fill-forward) and child row
+    // ... getMergedHeaders same
     const getMergedHeaders = (rawRows: any[], headerIndex: number, useDouble: boolean) => {
         const childRow = rawRows[headerIndex];
 
@@ -83,6 +91,16 @@ export const AdminConverter: React.FC = () => {
         return mergedHeaders;
     };
 
+    const toggleCurrencyCol = (index: number) => {
+        const newSet = new Set(currencyCols);
+        if (newSet.has(index)) {
+            newSet.delete(index);
+        } else {
+            newSet.add(index);
+        }
+        setCurrencyCols(newSet);
+    };
+
     const inspectFile = () => {
         if (!file) return;
         const reader = new FileReader();
@@ -92,19 +110,24 @@ export const AdminConverter: React.FC = () => {
                 const wb = XLSX.read(bstr, { type: 'binary' });
                 const wsname = wb.SheetNames[0];
                 const ws = wb.Sheets[wsname];
+
+                // RAW: TRUE (default) -> Read expected numbers as numbers 
+                // We want RAW values so we can format them cleanly ourselves if selected.
                 const rawRows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: null });
 
                 const headerIndex = Math.max(0, headerRowNo - 1);
-                const dataRowIndex = headerIndex + 1;
+                const rowToShowIndex = headerIndex;
 
-                if (dataRowIndex >= rawRows.length) {
-                    alert("Veri satırı okunamadı. Başlık satırı numarasını kontrol edin.");
+                if (rowToShowIndex >= rawRows.length) {
+                    alert("Satır okunamadı. Satır numarasını kontrol edin.");
                     return;
                 }
 
-                const row = rawRows[dataRowIndex];
+                // Temporary logic to get headers just for "TC Column Selection" Preview
+                const row = rawRows[rowToShowIndex];
                 if (!row || !Array.isArray(row)) {
-                    alert("Veri satırı boş.");
+                    alert("Seçilen satır boş veya geçersiz.");
+                    setInspectionData(null);
                     return;
                 }
 
@@ -112,9 +135,14 @@ export const AdminConverter: React.FC = () => {
                     const letter = XLSX.utils.encode_col(idx);
                     return { col: letter, val: String(val ?? '(boş)'), index: idx };
                 });
-
                 setInspectionData(map);
-                setStatusMsg(`Veri satırı (${dataRowIndex + 1}) görüntülendi. T.C. kutusuna tıklayın.`);
+
+                // Full Headers Logic for "Currency Column Selection"
+                // Must simulate the double header logic if checked
+                const computedHeaders = getMergedHeaders(rawRows, headerIndex, useDoubleHeader);
+                setDetectedHeaders(computedHeaders);
+
+                setStatusMsg(`Başlıklar algılandı. Lütfen T.C. Sütununu seçin ve Para Birimi olan sütunları işaretleyin.`);
             } catch (e: any) {
                 alert("Hata: " + e.message);
             }
@@ -140,17 +168,14 @@ export const AdminConverter: React.FC = () => {
                 const wsname = wb.SheetNames[0];
                 const ws = wb.Sheets[wsname];
 
+                // RAW: TRUE -> Get raw numbers (e.g. 5600.5)
                 const rawRows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: null });
                 const headerIndex = Math.max(0, headerRowNo - 1);
 
                 if (headerIndex >= rawRows.length) throw new Error(`Satır ${headerRowNo} bulunamadı.`);
 
                 const headers = getMergedHeaders(rawRows, headerIndex, useDoubleHeader);
-                console.log("Final Headers:", headers);
-
                 const tcIndex = getColIndex(tcColLetter);
-
-                // NEW: Use Dictionary for O(1) lookup and security
                 const encryptedMap: EncryptedOutput = {};
                 let count = 0;
 
@@ -163,9 +188,10 @@ export const AdminConverter: React.FC = () => {
                     let tcValueForKey = '';
 
                     headers.forEach((headerName: string, colIdx: number) => {
-                        const val = row[colIdx];
+                        let val = row[colIdx];
                         const cleanHeader = headerName.replace(/\./g, '').trim();
 
+                        // 1. Check if TC
                         if (colIdx === tcIndex) {
                             if (val !== undefined && val !== null) {
                                 const tcStr = String(val).trim();
@@ -174,17 +200,35 @@ export const AdminConverter: React.FC = () => {
                                 }
                             }
                         } else {
+                            // 2. Regular Columns
                             if (val !== undefined && val !== null) {
+                                // 3. MANUAL FORMATTING CHECK
+                                if (currencyCols.has(colIdx)) {
+                                    // FORCE FORMATTING AS TR CURRENCY
+                                    // Val is likely a number (since raw=true) or a string like "5600"
+                                    const numVal = Number(val);
+                                    if (!isNaN(numVal)) {
+                                        const formatted = new Intl.NumberFormat('tr-TR', {
+                                            style: 'currency',
+                                            currency: 'TRY',
+                                            minimumFractionDigits: 2
+                                        }).format(numVal);
+                                        // "₺5.600,00" -> "5.600,00 ₺"
+                                        val = formatted.replace('₺', '').trim() + ' ₺';
+                                    } else {
+                                        // Fallback if not a number
+                                        val = String(val);
+                                    }
+                                }
                                 obj[cleanHeader] = val;
                             }
                         }
                     });
 
                     if (tcValueForKey) {
-                        const lookupKey = hashTC(tcValueForKey);      // Key: SHA256(TC)
-                        const cipherText = encryptData(obj, tcValueForKey); // Value: AES(Row, key=TC)
-
-                        encryptedMap[lookupKey] = cipherText;
+                        const lookupKey = hashTC(tcValueForKey);
+                        const plainText = JSON.stringify(obj);
+                        encryptedMap[lookupKey] = plainText;
                         count++;
                     }
                 }
@@ -193,7 +237,7 @@ export const AdminConverter: React.FC = () => {
                     alert(`UYARI: "${tcColLetter}" sütununda veri bulunamadı!`);
                     setStatusMsg('Hata: Kayıt bulunamadı.');
                 } else {
-                    alert(`${count} kişi şifrelendi ve güvenli formata dönüştürüldü.`);
+                    alert(`${count} kişi başarıyla işlendi.`);
                     setStatusMsg(`Tamamlandı: ${count} satır.`);
                 }
 
@@ -226,7 +270,7 @@ export const AdminConverter: React.FC = () => {
     };
 
     return (
-        <div className="p-8 max-w-4xl mx-auto">
+        <div className="p-8 max-w-5xl mx-auto">
             <h1 className="text-2xl font-bold mb-4">Admin: Gelişmiş Excel Dönüştürücü</h1>
 
             <div className="bg-white p-6 rounded shadow mb-6 space-y-6">
@@ -263,7 +307,6 @@ export const AdminConverter: React.FC = () => {
                                 Üst satırla birleştir (Merge Headers)
                             </label>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">"Kuzu Sayısı" gibi genel başlıklar üst satırda ise işaretleyin.</p>
                     </div>
 
                     <div>
@@ -284,42 +327,68 @@ export const AdminConverter: React.FC = () => {
                         disabled={!file}
                         className="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800 w-full mb-4 font-semibold shadow"
                     >
-                        🔍 Dosya Yapısını ve Sütunları Göster
+                        🔍 Sütunları Listele (Önizle)
                     </button>
 
-                    {inspectionData && (
-                        <div className="bg-blue-50 p-4 rounded max-h-80 overflow-y-auto grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 border border-blue-200">
-                            {inspectionData.map((item) => (
-                                <div
-                                    key={item.col}
-                                    onClick={() => setTcColLetter(item.col)}
-                                    className={`p-2 rounded cursor-pointer border text-center transition-colors ${tcColLetter === item.col ? 'bg-red-600 text-white border-red-800 shadow-md transform scale-105' : 'bg-white hover:bg-red-50 border-gray-300'}`}
-                                >
-                                    <div className="font-bold text-xs mb-1">{item.col}</div>
-                                    <div className="text-xs truncate font-mono" title={item.val}>{item.val || '-'}</div>
-                                </div>
-                            ))}
+                    {detectedHeaders.length > 0 && (
+                        <div className="mb-6">
+                            <h3 className="font-bold text-lg mb-2 text-blue-800">Sütun Ayarları</h3>
+                            <p className="text-sm text-gray-600 mb-4 bg-yellow-50 p-2 border-l-4 border-yellow-400">
+                                Lütfen <strong>T.C. Sütunu</strong>'nu seçin ve <strong>Para Birimi (₺)</strong> formatında görünmesini istediğiniz sütunları işaretleyin.
+                            </p>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[500px] overflow-y-auto border p-2 rounded bg-gray-50">
+                                {detectedHeaders.map((header, idx) => {
+                                    const colLetter = XLSX.utils.encode_col(idx);
+                                    const isTc = tcColLetter === colLetter;
+                                    const isCurrency = currencyCols.has(idx);
+
+                                    return (
+                                        <div key={idx} className={`p-2 rounded border flex flex-col justify-between ${isTc ? 'bg-red-100 border-red-500' : 'bg-white'}`}>
+                                            <div className="flex items-start justify-between mb-2">
+                                                <span className="font-mono text-xs font-bold bg-gray-200 px-1 rounded">{colLetter}</span>
+                                                <button
+                                                    onClick={() => setTcColLetter(colLetter)}
+                                                    className={`text-xs px-2 py-0.5 rounded ${isTc ? 'bg-red-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-red-100'}`}
+                                                >
+                                                    {isTc ? 'T.C. SEÇİLDİ' : 'T.C. Yap'}
+                                                </button>
+                                            </div>
+
+                                            <div className="font-semibold text-sm mb-2 break-words leading-tight" title={header}>
+                                                {header}
+                                            </div>
+
+                                            <div className="mt-auto pt-2 border-t flex items-center">
+                                                <input
+                                                    type="checkbox"
+                                                    id={`curr-${idx}`}
+                                                    checked={isCurrency}
+                                                    onChange={() => toggleCurrencyCol(idx)}
+                                                    disabled={isTc} // TC cannot be currency
+                                                    className="w-4 h-4 text-green-600 rounded cursor-pointer"
+                                                />
+                                                <label htmlFor={`curr-${idx}`} className={`ml-2 text-xs font-bold cursor-pointer ${isCurrency ? 'text-green-700' : 'text-gray-500'}`}>
+                                                    {isCurrency ? 'PARA BİRİMİ (₺)' : 'Para Birimi Yap'}
+                                                </label>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
                     )}
                 </div>
 
-                <div>
-                    <label className="block text-sm font-bold text-red-700 mb-1">4. Seçili T.C. Sütunu:</label>
-                    <input
-                        type="text"
-                        value={tcColLetter}
-                        readOnly
-                        className="w-full border p-2 rounded bg-gray-100 font-bold text-red-900"
-                    />
+                <div className="mt-4">
+                    <button
+                        onClick={processFile}
+                        disabled={!file || !tcColLetter || processing}
+                        className="bg-green-600 text-white px-4 py-4 rounded disabled:opacity-50 hover:bg-green-700 w-full font-bold text-lg shadow-lg"
+                    >
+                        {processing ? 'İŞLENİYOR...' : '5. ÇEVİRMEK İÇİN TIKLA'}
+                    </button>
                 </div>
-
-                <button
-                    onClick={processFile}
-                    disabled={!file || !tcColLetter || processing}
-                    className="bg-green-600 text-white px-4 py-4 rounded disabled:opacity-50 hover:bg-green-700 w-full font-bold text-lg shadow-lg"
-                >
-                    {processing ? 'İŞLENİYOR...' : '5. ÇEVİR VE ŞİFRELE'}
-                </button>
 
                 {statusMsg && (
                     <div className={`p-3 text-center rounded font-medium ${statusMsg.includes('Hata') ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
@@ -331,15 +400,65 @@ export const AdminConverter: React.FC = () => {
             {jsonOutput && (
                 <div className="bg-gray-50 p-4 rounded">
                     <h2 className="text-xl font-semibold mb-2">Başarılı ({previewCount} kayıt)</h2>
-                    <p className="text-sm text-gray-600 mb-4">Veriler kişisel T.C. numaraları ile şifrelendi. Orijinal T.C. numarası olmadan bu dosyayı kimse okuyamaz.</p>
+                    <p className="text-sm text-gray-600 mb-4">Dosya başarıyla oluşturuldu. İndirip sisteme yükleyebilirsiniz.</p>
                     <button
                         onClick={downloadJson}
                         className="bg-blue-800 text-white px-6 py-3 rounded font-bold hover:bg-blue-900 w-full"
                     >
-                        ŞİFRELİ VERİ DOSYASINI İNDİR ({fileId}.json)
+                        JSON DOSYASINI İNDİR
                     </button>
                 </div>
             )}
+
+            {/* INFO GUIDE SECTION */}
+            <div className="mt-12 bg-yellow-50 border border-yellow-200 rounded p-6 text-sm text-gray-700">
+                <h3 className="font-bold text-lg mb-4 text-yellow-800 flex items-center">
+                    <span className="text-2xl mr-2">💡</span> Yönetici Bilgi Notları: Yeni Destek Nasıl Eklenir?
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div>
+                        <h4 className="font-bold border-b border-yellow-300 pb-1 mb-2">1. Bu JSON Dosyası Nereye Yüklenecek?</h4>
+                        <p className="mb-2">
+                            İndirdiğiniz dosyayı projenin içindeki şu klasöre atmanız gerekmektedir:
+                        </p>
+                        <code className="block bg-black text-white p-2 rounded mb-2 font-mono">
+                            public/data/
+                        </code>
+                        <p className="text-xs text-gray-500">
+                            Örneğin dosya adı <b>buzagi2025.json</b> ise, tam yol şöyle olmalıdır:<br />
+                            <code>.../Desteklemeler/public/data/buzagi2025.json</code>
+                        </p>
+                    </div>
+
+                    <div>
+                        <h4 className="font-bold border-b border-yellow-300 pb-1 mb-2">2. Sorgulama Listesine Nasıl Eklenir?</h4>
+                        <p className="mb-2">
+                            Yeni desteğin listede görünmesi için şu dosyayı düzenlemelisiniz:
+                        </p>
+                        <code className="block bg-black text-white p-2 rounded mb-2 font-mono">
+                            src/config.ts
+                        </code>
+                        <p className="mb-2">Dosyayı açıp listeye şunun gibi ekleme yapın:</p>
+                        <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">
+                            {`{ id: 'json_dosya_ismi', label: 'Ekranda Görünecek İsim' },`}
+                        </pre>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Önemli: <b>id</b> kısmı, JSON dosyasının ismiyle (uzantısız) birebir aynı olmalıdır.
+                        </p>
+                    </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-yellow-200">
+                    <p className="font-bold">Örnek Senaryo:</p>
+                    <ul className="list-disc list-inside ml-2 mt-1 space-y-1">
+                        <li>Admin panelinden dosyayı <b>arilik2026</b> ID'si ile oluşturdunuz.</li>
+                        <li>İnen <b>arilik2026.json</b> dosyasını <b>public/data/</b> altına attınız.</li>
+                        <li><b>src/config.ts</b> dosyasına gidip <code>{`{ id: 'arilik2026', label: '2026 Arılık Desteği' }`}</code> satırını eklediniz.</li>
+                        <li>Siteyi güncellediniz (Build & Push). Artık yayında!</li>
+                    </ul>
+                </div>
+            </div>
         </div>
     );
 };

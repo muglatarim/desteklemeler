@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { hashTC, decryptData } from '../utils/crypto';
-import { DISTRICTS, SUPPORT_TYPES } from '../config';
+import { hashTC } from '../utils/crypto';
+import { SUPPORT_TYPES } from '../config';
 
 export const Home: React.FC = () => {
-    const [district, setDistrict] = useState('');
+    // const [district, setDistrict] = useState(''); // REMOVED
     const [dataId, setDataId] = useState(''); // Selected Support ID
     const [tc, setTc] = useState('');
     const [result, setResult] = useState<any | null>(null);
@@ -17,7 +17,7 @@ export const Home: React.FC = () => {
         setResult(null);
 
         try {
-            if (!district || !dataId || !tc) {
+            if (!dataId || !tc) {
                 throw new Error('Lütfen tüm alanları doldurunuz.');
             }
 
@@ -29,12 +29,9 @@ export const Home: React.FC = () => {
             const hashedTc = hashTC(tc);
 
             // 2. Fetch the STATIC JSON file directly
-            // Note: In Vercel/Netlify/GitHub Pages, data is in 'api/data' or similar. 
-            // We moved it to 'api/data' previously. 
-            // For GitHub Pages, it might be better to put it in 'public/data'.
-            // For now, let's assume it is reachable at /api/data/{id}.json 
-            // OR we fix the build to copy it to root.
-            const response = await fetch(`/api/data/${dataId}.json`);
+            // Note: In Vite, 'public' folder is served at root.
+            // So 'public/data/foo.json' is accessible at '/data/foo.json'
+            const response = await fetch(`/data/${dataId}.json`);
 
             if (!response.ok) {
                 if (response.status === 404) {
@@ -49,13 +46,18 @@ export const Home: React.FC = () => {
             const encryptedRecord = encryptedMap[hashedTc];
 
             if (encryptedRecord) {
-                // 4. Decrypt using the raw TC as the key
+                // 4. No Decryption needed anymore
                 try {
-                    const decryptedData = decryptData(encryptedRecord, tc);
+                    // Veri artık düz string (stringify edilmiş JSON) veya eğer fetch otomatik parse ettiyse obje olabilir.
+                    // Ancak yapı gereği map[hash] = string (JSON string) saklıyorduk.
+                    const decryptedData = typeof encryptedRecord === 'string'
+                        ? JSON.parse(encryptedRecord)
+                        : encryptedRecord;
+
                     setResult(decryptedData);
                 } catch (decErr) {
                     console.error(decErr);
-                    throw new Error('Veri çözülemedi. T.C. hatalı veya veri bozuk.');
+                    throw new Error('Veri okunamadı. Format hatalı olabilir.');
                 }
             } else {
                 setError('Kayıt bulunamadı. Lütfen bilgileri kontrol ediniz.');
@@ -79,19 +81,10 @@ export const Home: React.FC = () => {
                 <div className="p-8">
                     <form onSubmit={handleSearch} className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">İlçe Seçiniz</label>
-                                <select
-                                    className="w-full border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 p-2 border"
-                                    value={district}
-                                    onChange={(e) => setDistrict(e.target.value)}
-                                >
-                                    <option value="">Seçiniz</option>
-                                    {DISTRICTS.map(d => <option key={d} value={d}>{d}</option>)}
-                                </select>
-                            </div>
+                            {/* REMOVED DISTRICT SELECTION */}
+                            {/* Make Support Type full width or keep as is? Let's make it span full width since it is alone now in this row, or better, just list it. */}
 
-                            <div>
+                            <div className="md:col-span-2">
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Destekleme Türü</label>
                                 <select
                                     className="w-full border-gray-300 rounded-md shadow-sm focus:ring-red-500 focus:border-red-500 p-2 border"
@@ -141,45 +134,29 @@ export const Home: React.FC = () => {
                                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                                     <tbody className="bg-white divide-y divide-gray-200">
                                         {Object.entries(result).map(([key, value]) => {
-                                            // 1. FILTERING: Hide specialized or empty-header columns
+                                            // 1. FILTERING:
+                                            // 'tcHash' is internal.
+                                            // 'Sıra No' is usually redundant but okay.
+                                            // Empty keys.
+                                            // 1. FILTERING:
+                                            // 'tcHash' is internal.
+                                            // Empty keys.
+                                            // Empty values (null, undefined, empty string)
                                             if (
                                                 key === 'tcHash' ||
-                                                key === 'Sıra No' ||
-                                                key.startsWith('Sütun') || // Auto-generated for empty headers
-                                                key.trim() === ''
+                                                key.trim() === '' ||
+                                                value === null ||
+                                                value === undefined ||
+                                                String(value).trim() === ''
                                             ) return null;
 
-                                            // 2. FORMATTING: Detect Currency
+                                            // NO AUTOMATIC FORMATTING
+                                            // Formatting is done in AdminConverter manually by user selection.
+                                            // Here we just display whatever is in the JSON.
                                             let displayValue = String(value);
-                                            const lowerKey = key.toLowerCase();
 
-                                            // Keywords that suggest money
-                                            const isCurrency = ['tutar', 'destek', 'miktar', 'ödeme', 'net', 'kesinti', 'hakediş'].some(k => lowerKey.includes(k));
-
-                                            // Additional check: value must look like a number
-                                            // Remove spaces to check
-                                            const cleanVal = displayValue.toString().trim();
-
-                                            if (isCurrency && cleanVal && !isNaN(Number(cleanVal.replace(',', '.')))) {
-                                                try {
-                                                    // Try to parse number. Handle Turkish decimal comma if present as string, or standard dot
-                                                    // Usually XLSX reads numbers as numbers (1234.56), but sometimes strings ("1.234,56")
-                                                    let numVal = typeof value === 'number' ? value : parseFloat(cleanVal.replace(/\./g, '').replace(',', '.'));
-
-                                                    // If standard parse failed (e.g. 1234.56 came as string "1234.56"), try just parseFloat
-                                                    if (isNaN(numVal)) numVal = parseFloat(cleanVal);
-
-                                                    if (!isNaN(numVal)) {
-                                                        displayValue = new Intl.NumberFormat('tr-TR', {
-                                                            style: 'currency',
-                                                            currency: 'TRY',
-                                                            minimumFractionDigits: 2
-                                                        }).format(numVal);
-                                                    }
-                                                } catch (e) {
-                                                    // checking failed, keep original
-                                                }
-                                            }
+                                            // Just basic check for null/undefined if filtered above didn't catch it
+                                            if (value === null || value === undefined) displayValue = '';
 
                                             return (
                                                 <tr key={key}>
