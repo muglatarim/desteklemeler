@@ -6,6 +6,6 @@ export interface SupportType {
 
 // Data IDs must match the uploaded filename IDs (without .json)
 export const SUPPORT_TYPES: SupportType[] = [
-    { id: 'buzagiaski2025_1', label: '2025 Yılı Buzağı Desteklemesi (1.Dönem) Aslı Listesi' },
-    { id: 'kuzuoglakaski2025_1', label: '2025 Yılı Kuzu ve Oğlak Desteği (1.Dönem) Askı Listesi' },
+    { id: 'buzagiaski2025_1', label: '2025 Yılı Birinci Dönem Buzağı Desteklemesi Askı Listesi' },
+    { id: 'kuzuoglakaski2025_1', label: '2025 Yılı Birinci Dönem Küçükbaş Hayvancılık Desteklemeleri Askı Listesi' },
 ];
