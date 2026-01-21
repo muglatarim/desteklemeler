@@ -25,46 +25,62 @@ export const Home: React.FC = () => {
                 throw new Error('T.C. (11) veya Vergi No (10) giriniz.');
             }
 
-            // 1. Calculate Hash of TC (Lookup Key)
+            // 1. Calculate Hash
             const hashedTc = hashTC(tc);
 
-            // 2. Fetch the STATIC JSON file using dynamic BASE_URL
-            // Note: In Vite, 'public' folder is served at root.
-            // On GitHub Pages, we are at /Desteklemeler/, so we need import.meta.env.BASE_URL
-            const baseUrl = import.meta.env.BASE_URL; // e.g. "/" or "/Desteklemeler/"
-            const response = await fetch(`${baseUrl}data/${dataId}.json`);
+            // 2. Calculate Shard ID (Mod 100)
+            const bigVal = BigInt("0x" + hashedTc);
+            const shardId = Number(bigVal % 100n);
+
+            // 3. Fetch the Specific Shard JSON
+            const baseUrl = import.meta.env.BASE_URL;
+            const url = `${baseUrl}data/${dataId}/${shardId}.json`;
+            console.log("Fetching shard:", url);
+
+            const response = await fetch(url);
 
             if (!response.ok) {
                 if (response.status === 404) {
-                    throw new Error('Seçilen ilgili liste bulunamadı (Dosya yok).');
+                    throw new Error('Kayıt bulunamadı (Liste parçası yok).');
                 }
                 throw new Error('Veri listesi yüklenirken hata oluştu.');
             }
 
-            const encryptedMap = await response.json();
+            const shardData = await response.json();
 
-            // 3. Lookup the encrypted record
-            const encryptedRecord = encryptedMap[hashedTc];
+            // 4. Lookup Record in Shard
+            // Format: { cols: [...], data: { hash: [vals] OR [[vals],[vals]] } }
+            const recordValues = shardData.data[hashedTc];
 
-            if (encryptedRecord) {
-                // 4. No Decryption needed anymore
-                try {
-                    // Veri artık düz string (stringify edilmiş JSON) veya eğer fetch otomatik parse ettiyse obje olabilir.
-                    // Ancak yapı gereği map[hash] = string (JSON string) saklıyorduk.
-                    const decryptedData = typeof encryptedRecord === 'string'
-                        ? JSON.parse(encryptedRecord)
-                        : encryptedRecord;
+            if (recordValues) {
+                const cols = shardData.cols;
 
-                    setResult(decryptedData);
-                } catch (decErr) {
-                    console.error(decErr);
-                    throw new Error('Veri okunamadı. Format hatalı olabilir.');
+                // Helper to zip cols and vals into object
+                const createObj = (vals: any[]) => {
+                    const obj: any = {};
+                    cols.forEach((col: string, idx: number) => {
+                        obj[col] = vals[idx];
+                    });
+                    return obj;
+                };
+
+                let finalData;
+                // Check if it's a single record or multiple (Array of Arrays)
+                if (Array.isArray(recordValues[0])) {
+                    // Multiple records
+                    finalData = recordValues.map((v: any[]) => createObj(v));
+                } else {
+                    // Single record
+                    finalData = createObj(recordValues);
                 }
+
+                setResult(finalData);
             } else {
                 setError('Kayıt bulunamadı. Lütfen bilgileri kontrol ediniz.');
             }
 
         } catch (err: any) {
+            console.error(err);
             setError(err.message || 'Bir hata oluştu.');
         } finally {
             setLoading(false);
